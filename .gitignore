@@ -1,0 +1,17 @@
+# Build directory
+build/
+bin/
+out/
+.vs/
+*.user
+*.suo
+
+# Large generated / binary files
+*.pdb
+*.ilk
+*.map
+*.dll
+*.exe
+*.zip
+*.obj
+*.lib
