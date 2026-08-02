@@ -41,6 +41,42 @@ MainComponent::MainComponent()
         }
     };
 
+    propertiesPanel->onFileLoaded = [this](const juce::File& file) {
+        int l = mediaEngine.getSelectedLayer();
+        int c = mediaEngine.getSelectedCol();
+        if (l >= 0 && c >= 0)
+        {
+            juce::StringArray files;
+            files.add(file.getFullPathName());
+            // Since ClipGridComponent needs an x, y for filesDropped, but we know the cell,
+            // we can just call filesDropped with a mock position inside that cell, or refactor.
+            // Actually, we can just do what filesDropped does right here!
+            auto& clip = mediaEngine.getClipInGrid(l, c);
+            clip.file = file;
+            clip.name = file.getFileNameWithoutExtension();
+            clip.isProcedural = false;
+            clip.isLoaded = true;
+
+            juce::String ext = file.getFileExtension().toLowerCase();
+            if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".gif")
+            {
+                juce::Image img = juce::ImageFileFormat::loadFrom(file);
+                if (img.isValid())
+                    clip.image = img;
+            }
+            else
+            {
+                clip.image = juce::Image(juce::Image::RGB, 100, 100, true);
+                clip.transport.duration = 10.0;
+            }
+
+            clipGridPanel->markThumbnailDirty(l, c);
+            mediaEngine.previewClipInGrid(l, c);
+            propertiesPanel->updateDetails(mediaEngine.getPreviewClip());
+            clipGridPanel->repaint();
+        }
+    };
+
     propertiesPanel->onPropertiesChanged = [this] {
         int l = mediaEngine.getSelectedLayer();
         int c = mediaEngine.getSelectedCol();
@@ -53,6 +89,9 @@ MainComponent::MainComponent()
             propertiesPanel->updateClipFromSliders(previewClip);
             propertiesPanel->updateClipFromSliders(gridClip);
             
+            if (previewClip.videoClip != nullptr)
+                previewClip.videoClip->setLooping(previewClip.transport.loop);
+            
             // Sync envelopes and base values completely
             gridClip.transform = previewClip.transform;
 
@@ -63,6 +102,10 @@ MainComponent::MainComponent()
                 activeClip.transform = previewClip.transform;
                 activeClip.transport.speed = previewClip.transport.speed;
                 activeClip.transport.loop = previewClip.transport.loop;
+                
+                if (activeClip.videoClip != nullptr)
+                    activeClip.videoClip->setLooping(activeClip.transport.loop);
+                    
                 activeClip.transport.isPlaying = previewClip.transport.isPlaying;
             }
         }
@@ -181,30 +224,7 @@ void MainComponent::timerCallback()
     // Tick playhead animations
     mediaEngine.update(deltaTime);
 
-    // Determine if anything is actively playing
-    bool anyPlaying = false;
     auto& previewClip = mediaEngine.getPreviewClip();
-    if (previewClip.isLoaded && previewClip.transport.isPlaying)
-    {
-        anyPlaying = true;
-    }
-    else
-    {
-        for (int i = 0; i < mediaEngine.getNumLayers(); ++i)
-        {
-            if (mediaEngine.getActiveLayerClip(i).isLoaded && mediaEngine.getActiveLayerClip(i).transport.isPlaying)
-            {
-                anyPlaying = true;
-                break;
-            }
-        }
-    }
-
-    // Adaptive timer: 30Hz when playing, 5Hz when idle
-    int desiredHz = anyPlaying ? 30 : 5;
-    int desiredMs = 1000 / desiredHz;
-    if (getTimerInterval() != desiredMs)
-        startTimer(desiredMs);
 
     int l = mediaEngine.getSelectedLayer();
     int c = mediaEngine.getSelectedCol();
@@ -237,23 +257,20 @@ void MainComponent::timerCallback()
         }
     }
 
-    // Refresh screens ONLY when videos are active/playing
-    if (anyPlaying)
+    // Refresh screens unconditionally at 60Hz
+    mediaEngine.updateCompositionFrame();
+    monitorPanel->refreshMonitors();
+    
+    if (outputWindow != nullptr && outputWindow->isVisible())
     {
-        mediaEngine.updateCompositionFrame();
-        monitorPanel->refreshMonitors();
-        
-        if (outputWindow != nullptr && outputWindow->isVisible())
-        {
-            outputWindow->repaint();
-        }
+        outputWindow->repaint();
+    }
 
-        if (advancedOutputWindow != nullptr)
-        {
-            advancedOutputWindow->repaintDeviceWindows();
-            if (advancedOutputWindow->isVisible())
-                advancedOutputWindow->repaint();
-        }
+    if (advancedOutputWindow != nullptr)
+    {
+        advancedOutputWindow->repaintDeviceWindows();
+        if (advancedOutputWindow->isVisible())
+            advancedOutputWindow->repaint();
     }
 
     auto elapsed = juce::Time::getMillisecondCounterHiRes() - t0;
@@ -288,10 +305,38 @@ juce::PopupMenu MainComponent::getMenuForIndex(int menuIndex, const juce::String
         menu.addItem(301, "Edit MIDI", true, mediaEngine.mappingManager.getEditMode() == MappingManager::EditMode::MIDI);
         menu.addItem(302, "Edit OSC", true, mediaEngine.mappingManager.getEditMode() == MappingManager::EditMode::OSC);
     }
-    else
+    else if (menuName == "Composition")
     {
-        menu.addItem(100, "Option 1 (Placeholder)", false);
-        menu.addItem(101, "Option 2 (Placeholder)", false);
+        menu.addItem(1001, "New");
+        menu.addItem(1002, "Open...");
+        menu.addItem(1003, "Save");
+        menu.addItem(1004, "Save As...");
+        menu.addSeparator();
+        menu.addItem(1005, "Quit");
+    }
+    else if (menuName == "Deck")
+    {
+        menu.addItem(1101, "Clear Deck");
+    }
+    else if (menuName == "Group")
+    {
+        menu.addItem(1201, "Add Group");
+    }
+    else if (menuName == "Layer")
+    {
+        menu.addItem(1301, "Add Layer");
+        menu.addItem(1302, "Remove Layer", true, mediaEngine.getSelectedLayer() >= 0);
+        menu.addItem(1303, "Clear Layer", true, mediaEngine.getSelectedLayer() >= 0);
+    }
+    else if (menuName == "Column")
+    {
+        menu.addItem(1401, "Trigger Column", true, mediaEngine.getSelectedCol() >= 0);
+        menu.addItem(1402, "Remove Column", true, mediaEngine.getSelectedCol() >= 0);
+        menu.addItem(1403, "Clear Column", true, mediaEngine.getSelectedCol() >= 0);
+    }
+    else if (menuName == "Clip")
+    {
+        menu.addItem(1501, "Clear Clip", true, mediaEngine.getSelectedLayer() >= 0 && mediaEngine.getSelectedCol() >= 0);
     }
     return menu;
 }
@@ -381,5 +426,84 @@ void MainComponent::menuItemSelected(int menuItemId, int topLevelMenuIndex)
         repaint();
         propertiesPanel->repaint();
         nodeEditor->triggerPropertiesRepaint();
+    }
+    else if (menuItemId == 1001) // Composition -> New
+    {
+        mediaEngine.clearDeck();
+        repaint();
+    }
+    else if (menuItemId == 1002 || menuItemId == 1003 || menuItemId == 1004) // Composition -> Open/Save
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon, "Coming Soon", "Save/Load architecture is not fully implemented yet.");
+    }
+    else if (menuItemId == 1005) // Composition -> Quit
+    {
+        juce::JUCEApplication::getInstance()->systemRequestedQuit();
+    }
+    else if (menuItemId == 1101) // Deck -> Clear Deck
+    {
+        mediaEngine.clearDeck();
+        repaint();
+    }
+    else if (menuItemId == 1201) // Group -> Add Group
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon, "Coming Soon", "Groups are not fully implemented yet.");
+    }
+    else if (menuItemId == 1301) // Layer -> Add Layer
+    {
+        mediaEngine.addLayer();
+        resized();
+        repaint();
+    }
+    else if (menuItemId == 1302) // Layer -> Remove Layer
+    {
+        int sel = mediaEngine.getSelectedLayer();
+        if (sel >= 0) {
+            mediaEngine.removeLayer(sel);
+            resized();
+            repaint();
+        }
+    }
+    else if (menuItemId == 1303) // Layer -> Clear Layer
+    {
+        int sel = mediaEngine.getSelectedLayer();
+        if (sel >= 0) {
+            mediaEngine.clearLayer(sel);
+            repaint();
+        }
+    }
+    else if (menuItemId == 1401) // Column -> Trigger Column
+    {
+        int sel = mediaEngine.getSelectedCol();
+        if (sel >= 0) {
+            mediaEngine.triggerColumn(sel);
+            repaint();
+        }
+    }
+    else if (menuItemId == 1402) // Column -> Remove Column
+    {
+        int sel = mediaEngine.getSelectedCol();
+        if (sel >= 0) {
+            mediaEngine.removeColumn(sel);
+            resized();
+            repaint();
+        }
+    }
+    else if (menuItemId == 1403) // Column -> Clear Column
+    {
+        int sel = mediaEngine.getSelectedCol();
+        if (sel >= 0) {
+            mediaEngine.clearColumn(sel);
+            repaint();
+        }
+    }
+    else if (menuItemId == 1501) // Clip -> Clear Clip
+    {
+        int selL = mediaEngine.getSelectedLayer();
+        int selC = mediaEngine.getSelectedCol();
+        if (selL >= 0 && selC >= 0) {
+            mediaEngine.clearClip(selL, selC);
+            repaint();
+        }
     }
 }

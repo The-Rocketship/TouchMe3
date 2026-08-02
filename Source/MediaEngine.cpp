@@ -17,27 +17,32 @@ MediaEngine::MediaEngine()
     settingsManager.onMidiDevicesChanged = [this](const juce::StringArray& devices) {
         mappingManager.setMidiDevices(devices);
     };
+    mappingManager.getDeviceManager().addAudioCallback(this);
 
     // Register FFmpeg reader format
+#if FOLEYS_USE_FFMPEG
     videoEngine.getFormatManager().registerFormat (std::make_unique<foleys::FFmpegFormat>());
+#endif
 
     soloedLayer = -1;
     // Populate the grid with some procedural default templates so the user can play with them immediately!
     juce::String names[4] = { "Cyber Plasma", "Grid Tunnel", "Spectral Neon", "Hypno Spiral" };
 
     // Initialize vectors
-    int initialLayers = 8;
-    int initialCols = 12;
+    int initialLayers = 4;
+    int initialCols = 6;
 
     gridClips.resize(initialLayers, std::vector<ClipState>(initialCols));
     activeLayers.resize(initialLayers);
     layerOpacities.resize(initialLayers, 1.0);
     layerBypassed.resize(initialLayers, false);
+    layerMuted.resize(initialLayers, false);
 
     for (int l = 0; l < initialLayers; ++l)
     {
         layerOpacities[l] = 1.0;
         layerBypassed[l] = false;
+        layerMuted[l] = false;
 
         for (int c = 0; c < initialCols; ++c)
         {
@@ -127,33 +132,35 @@ void MediaEngine::update(double deltaTimeSeconds)
         auto& clip = activeLayers[l];
         if (clip.isLoaded && clip.transport.isPlaying)
         {
-            double oldPos = clip.transport.position;
-            double delta = deltaTimeSeconds * clip.transport.speed;
-            double duration = clip.transport.duration > 0.0 ? clip.transport.duration : 10.0;
-            clip.transport.position += delta;
-            
-            bool looped = false;
-            if (clip.transport.position >= duration)
-            {
-                if (clip.transport.loop)
-                {
-                    clip.transport.position = std::fmod(clip.transport.position, duration);
-                    looped = true;
-                }
-                else
-                {
-                    clip.transport.position = duration;
-                    clip.transport.isPlaying = false;
-                }
-            }
-
-            // Sync seek to videoClip decoder if looped or position jumped
             if (clip.videoClip != nullptr)
             {
-                double expectedPos = oldPos + delta;
-                if (looped || std::abs(clip.transport.position - expectedPos) > 0.5)
+                // Sync internal state from naturally-advancing audio thread
+                double currentPos = clip.videoClip->getNextReadPosition() / clip.videoClip->getSampleRate();
+                clip.transport.position = currentPos;
+                
+                if (clip.transport.position >= clip.transport.duration - 0.1)
                 {
-                    clip.videoClip->setNextReadPosition (juce::int64 (clip.transport.position * clip.videoClip->getSampleRate()));
+                    if (clip.transport.loop)
+                        clip.videoClip->setNextReadPosition(0.0);
+                    else
+                        clip.transport.isPlaying = false;
+                }
+            }
+            else
+            {
+                double delta = deltaTimeSeconds * clip.transport.speed;
+                double duration = clip.transport.duration > 0.0 ? clip.transport.duration : 10.0;
+                clip.transport.position += delta;
+                
+                if (clip.transport.position >= duration)
+                {
+                    if (clip.transport.loop)
+                        clip.transport.position = std::fmod(clip.transport.position, duration);
+                    else
+                    {
+                        clip.transport.position = duration;
+                        clip.transport.isPlaying = false;
+                    }
                 }
             }
         }
@@ -162,33 +169,34 @@ void MediaEngine::update(double deltaTimeSeconds)
     // Update preview clip
     if (previewClip.isLoaded && previewClip.transport.isPlaying)
     {
-        double oldPos = previewClip.transport.position;
-        double delta = deltaTimeSeconds * previewClip.transport.speed;
-        double duration = previewClip.transport.duration > 0.0 ? previewClip.transport.duration : 10.0;
-        previewClip.transport.position += delta;
-        
-        bool looped = false;
-        if (previewClip.transport.position >= duration)
-        {
-            if (previewClip.transport.loop)
-            {
-                previewClip.transport.position = std::fmod(previewClip.transport.position, duration);
-                looped = true;
-            }
-            else
-            {
-                previewClip.transport.position = duration;
-                previewClip.transport.isPlaying = false;
-            }
-        }
-
-        // Sync seek to videoClip decoder if looped or position jumped
         if (previewClip.videoClip != nullptr)
         {
-            double expectedPos = oldPos + delta;
-            if (looped || std::abs(previewClip.transport.position - expectedPos) > 0.5)
+            double currentPos = previewClip.videoClip->getNextReadPosition() / previewClip.videoClip->getSampleRate();
+            previewClip.transport.position = currentPos;
+            
+            if (previewClip.transport.position >= previewClip.transport.duration - 0.1)
             {
-                previewClip.videoClip->setNextReadPosition (juce::int64 (previewClip.transport.position * previewClip.videoClip->getSampleRate()));
+                if (previewClip.transport.loop)
+                    previewClip.videoClip->setNextReadPosition(0.0);
+                else
+                    previewClip.transport.isPlaying = false;
+            }
+        }
+        else
+        {
+            double delta = deltaTimeSeconds * previewClip.transport.speed;
+            double duration = previewClip.transport.duration > 0.0 ? previewClip.transport.duration : 10.0;
+            previewClip.transport.position += delta;
+            
+            if (previewClip.transport.position >= duration)
+            {
+                if (previewClip.transport.loop)
+                    previewClip.transport.position = std::fmod(previewClip.transport.position, duration);
+                else
+                {
+                    previewClip.transport.position = duration;
+                    previewClip.transport.isPlaying = false;
+                }
             }
         }
     }
@@ -208,7 +216,7 @@ void MediaEngine::updateCompositionFrame()
     {
         if (soloedL != -1 && soloedL != l)
             continue;
-        if (!isLayerBypassed(l) && activeLayers[l].isLoaded)
+        if (!isLayerBypassed(l) && !isLayerMuted(l) && activeLayers[l].isLoaded)
         {
             anyActive = true;
             break;
@@ -227,7 +235,7 @@ void MediaEngine::updateCompositionFrame()
         if (soloedL != -1 && soloedL != l)
             continue;
 
-        if (!isLayerBypassed(l))
+        if (!isLayerBypassed(l) && !isLayerMuted(l))
         {
             auto& clip = activeLayers[l];
             if (clip.isLoaded)
@@ -245,9 +253,12 @@ void MediaEngine::renderClip(juce::Graphics& g, const ClipState& clip, float wid
 
     g.saveState();
 
+    float renderWidth = clip.transform.width > 0 ? (float)clip.transform.width : width;
+    float renderHeight = clip.transform.height > 0 ? (float)clip.transform.height : height;
+
     // Calculate center and pivot
-    float cx = width * 0.5f;
-    float cy = height * 0.5f;
+    float cx = renderWidth * 0.5f;
+    float cy = renderHeight * 0.5f;
 
     // Apply Opacity
     float finalOpacity = clip.transform.opacity.eval(clip.transport.position) * masterOpacity;
@@ -260,8 +271,8 @@ void MediaEngine::renderClip(juce::Graphics& g, const ClipState& clip, float wid
     float finalScaleY = clip.transform.scale.eval(clip.transport.position) * clip.transform.scaleY.eval(clip.transport.position);
 
     // Apply anchor offsets
-    float ax = width * clip.transform.anchorX.eval(clip.transport.position);
-    float ay = height * clip.transform.anchorY.eval(clip.transport.position);
+    float ax = renderWidth * clip.transform.anchorX.eval(clip.transport.position);
+    float ay = renderHeight * clip.transform.anchorY.eval(clip.transport.position);
 
     // Translate, Rotate, Scale relative to anchor point
     juce::AffineTransform t = juce::AffineTransform::translation(-ax, -ay)
@@ -279,16 +290,16 @@ void MediaEngine::renderClip(juce::Graphics& g, const ClipState& clip, float wid
 
     if (clip.isNodeBased && clip.nodeGraph)
     {
-        clip.nodeGraph->renderOutput(g, juce::Rectangle<float>(0.0f, 0.0f, width, height), clip.transport.position);
+        clip.nodeGraph->renderOutput(g, juce::Rectangle<float>(0.0f, 0.0f, renderWidth, renderHeight), clip.transport.position);
     }
     else if (clip.isProcedural)
     {
-        renderProceduralVisual(g, clip.proceduralType, clip.transport.position, width, height, finalOpacity);
+        renderProceduralVisual(g, clip.proceduralType, clip.transport.position, renderWidth, renderHeight, finalOpacity);
     }
     else if (clip.videoClip != nullptr)
     {
         // Render foleys_video_engine clip directly inside graphics context
-        clip.videoClip->render(g, juce::Rectangle<float>(0.0f, 0.0f, width, height), clip.transport.position, 0.0f, 100.0f, {}, finalOpacity);
+        clip.videoClip->render(g, juce::Rectangle<float>(0.0f, 0.0f, renderWidth, renderHeight), clip.transport.position, 0.0f, 100.0f, {}, finalOpacity);
     }
     else if (clip.image.isValid())
     {
@@ -561,6 +572,7 @@ void MediaEngine::triggerClip(int layerIdx, int colIdx)
                 {
                     activeClip.videoClip->setAspectType(foleys::Aspect::ZoomScale);
                     activeClip.videoClip->prepareToPlay(512, 44100.0);
+                    activeClip.videoClip->setLooping(activeClip.transport.loop);
                     activeClip.transport.duration = activeClip.videoClip->getLengthInSeconds();
                 }
             }
@@ -582,6 +594,7 @@ void MediaEngine::removeLayer(int layerIdx)
     activeLayers.erase(activeLayers.begin() + layerIdx);
     layerOpacities.erase(layerOpacities.begin() + layerIdx);
     layerBypassed.erase(layerBypassed.begin() + layerIdx);
+    layerMuted.erase(layerMuted.begin() + layerIdx);
     
     if (selectedLayer == layerIdx) selectedLayer = -1;
     else if (selectedLayer > layerIdx) selectedLayer--;
@@ -656,8 +669,162 @@ void MediaEngine::previewClipInGrid(int layerIdx, int colIdx)
             {
                 previewClip.videoClip->setAspectType(foleys::Aspect::ZoomScale);
                 previewClip.videoClip->prepareToPlay(512, 44100.0);
+                previewClip.videoClip->setLooping(previewClip.transport.loop);
                 previewClip.transport.duration = previewClip.videoClip->getLengthInSeconds();
             }
         }
     }
 }
+
+void MediaEngine::addLayer()
+{
+    int numCols = getNumCols();
+    std::vector<ClipState> newRow(numCols);
+    for (int c = 0; c < numCols; ++c)
+    {
+        newRow[c].sourceCol = c;
+        newRow[c].name = "- Empty -";
+        newRow[c].isLoaded = false;
+    }
+    gridClips.push_back(newRow);
+    
+    ClipState newActive;
+    newActive.isLoaded = false;
+    activeLayers.push_back(newActive);
+    
+    layerOpacities.push_back(1.0);
+    layerBypassed.push_back(false);
+    layerMuted.push_back(false);
+}
+
+void MediaEngine::clearLayer(int layerIdx)
+{
+    if (layerIdx >= 0 && layerIdx < getNumLayers())
+    {
+        for (int c = 0; c < getNumCols(); ++c)
+        {
+            gridClips[layerIdx][c] = ClipState();
+            gridClips[layerIdx][c].sourceCol = c;
+            gridClips[layerIdx][c].name = "- Empty -";
+            gridClips[layerIdx][c].isLoaded = false;
+        }
+        activeLayers[layerIdx].isLoaded = false;
+        activeLayers[layerIdx].transport.isPlaying = false;
+    }
+}
+
+void MediaEngine::triggerColumn(int colIdx)
+{
+    if (colIdx >= 0 && colIdx < getNumCols())
+    {
+        for (int l = 0; l < getNumLayers(); ++l)
+        {
+            triggerClip(l, colIdx);
+        }
+    }
+}
+
+void MediaEngine::clearColumn(int colIdx)
+{
+    if (colIdx >= 0 && colIdx < getNumCols())
+    {
+        for (int l = 0; l < getNumLayers(); ++l)
+        {
+            gridClips[l][colIdx] = ClipState();
+            gridClips[l][colIdx].sourceCol = colIdx;
+            gridClips[l][colIdx].name = "- Empty -";
+            gridClips[l][colIdx].isLoaded = false;
+
+            if (activeLayers[l].sourceCol == colIdx)
+            {
+                activeLayers[l].isLoaded = false;
+                activeLayers[l].transport.isPlaying = false;
+                activeLayers[l].sourceCol = -1;
+            }
+        }
+    }
+}
+
+void MediaEngine::clearClip(int layerIdx, int colIdx)
+{
+    if (layerIdx >= 0 && layerIdx < getNumLayers() && colIdx >= 0 && colIdx < getNumCols())
+    {
+        gridClips[layerIdx][colIdx] = ClipState();
+        gridClips[layerIdx][colIdx].sourceCol = colIdx;
+        gridClips[layerIdx][colIdx].name = "- Empty -";
+        gridClips[layerIdx][colIdx].isLoaded = false;
+        
+        if (activeLayers[layerIdx].sourceCol == colIdx)
+        {
+            activeLayers[layerIdx].isLoaded = false;
+            activeLayers[layerIdx].transport.isPlaying = false;
+            activeLayers[layerIdx].sourceCol = -1;
+        }
+    }
+}
+
+void MediaEngine::clearDeck()
+{
+    for (int l = 0; l < getNumLayers(); ++l)
+    {
+        clearLayer(l);
+    }
+    selectedCol = -1;
+    selectedLayer = -1;
+}
+
+void MediaEngine::audioDeviceIOCallbackWithContext (const float* const* inputChannelData, int numInputChannels,
+                                                    float* const* outputChannelData, int numOutputChannels,
+                                                    int numSamples, const juce::AudioIODeviceCallbackContext& context)
+{
+    // Zero the outputs first in case video engine doesn't overwrite
+    for (int i = 0; i < numOutputChannels; ++i)
+    {
+        if (outputChannelData[i] != nullptr)
+        {
+            juce::FloatVectorOperations::clear (outputChannelData[i], numSamples);
+        }
+    }
+
+    juce::AudioBuffer<float> buffer (const_cast<float**> (outputChannelData), numOutputChannels, numSamples);
+    juce::AudioSourceChannelInfo info (&buffer, 0, numSamples);
+
+    // This call is critical: it pumps the foleys_video_engine decoder 
+    // thread to advance the video stream based on audio playback time.
+    auto& previewClip = getPreviewClip();
+    if (previewClip.transport.isPlaying && previewClip.videoClip != nullptr) {
+        previewClip.videoClip->getNextAudioBlock(info);
+        
+        // Get exact sample positions
+        juce::int64 currentSample = previewClip.videoClip->getNextReadPosition();
+        juce::int64 totalSamples = previewClip.videoClip->getTotalLength();
+        
+        // Loop if we are within 2000 audio samples of the end
+        if (previewClip.transport.loop && currentSample >= (totalSamples - 2000)) {
+            previewClip.videoClip->setNextReadPosition(0);
+        } else if (!previewClip.transport.loop && currentSample >= (totalSamples - 2000)) {
+            previewClip.transport.isPlaying = false;
+            previewClip.videoClip->setNextReadPosition(0);
+        }
+    }
+        
+    for (int l = 0; l < getNumLayers(); ++l) {
+        auto& activeClip = getActiveLayerClip(l);
+        if (activeClip.transport.isPlaying && activeClip.videoClip != nullptr) {
+            activeClip.videoClip->getNextAudioBlock(info);
+            
+            // Get exact sample positions
+            juce::int64 currentSample = activeClip.videoClip->getNextReadPosition();
+            juce::int64 totalSamples = activeClip.videoClip->getTotalLength();
+            
+            // Loop if we are within 2000 audio samples of the end
+            if (activeClip.transport.loop && currentSample >= (totalSamples - 2000)) {
+                activeClip.videoClip->setNextReadPosition(0);
+            } else if (!activeClip.transport.loop && currentSample >= (totalSamples - 2000)) {
+                activeClip.transport.isPlaying = false;
+                activeClip.videoClip->setNextReadPosition(0);
+            }
+        }
+    }
+}
+

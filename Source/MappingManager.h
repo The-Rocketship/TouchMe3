@@ -18,6 +18,8 @@ public:
     void reconnectOscIn(int port);
     void reconnectOscOut(int port);
     void setMidiDevices(const juce::StringArray& devices);
+    
+    juce::AudioDeviceManager& getDeviceManager() { return deviceManager; }
 
     // Call this whenever the active NodeGraph changes or nodes are added/removed
     void registerParameters(std::shared_ptr<NodeGraph> graph);

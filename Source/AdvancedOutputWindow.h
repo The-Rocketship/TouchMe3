@@ -13,6 +13,13 @@ struct WarpSlice
     int subdivY = 1;
     std::vector<juce::Point<float>> gridPoints;
 
+    // Edge Blending
+    float blendTop = 0.0f;
+    float blendBottom = 0.0f;
+    float blendLeft = 0.0f;
+    float blendRight = 0.0f;
+    float blendGamma = 1.8f;
+
     float opacity = 1.0f;
     bool isEnabled = true;
 
@@ -142,6 +149,11 @@ public:
         juce::TextEditor subdivYEditor;
         juce::TextButton resetGridBtn;
 
+        // 4. Edge Blending Controls
+        juce::Label edgeBlendLabel;
+        juce::Label blendTopLabel, blendBottomLabel, blendLeftLabel, blendRightLabel, blendGammaLabel;
+        juce::Slider blendTopSlider, blendBottomSlider, blendLeftSlider, blendRightSlider, blendGammaSlider;
+
         // Center Canvas Viewport & Editor Area
         class CanvasArea : public juce::Component
         {
@@ -251,6 +263,7 @@ private:
     struct Vertex {
         float position[2];
         float texCoord[2];
+        float sliceCoord[2];
     };
 };
 

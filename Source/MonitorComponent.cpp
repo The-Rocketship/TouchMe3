@@ -74,7 +74,17 @@ void MonitorComponent::SingleMonitor::paint(juce::Graphics& g)
         auto& clip = mediaEngine.getPreviewClip();
         if (clip.isLoaded)
         {
-            mediaEngine.renderClip(g, clip, (float)clipArea.getWidth(), (float)clipArea.getHeight(), 1.0f);
+            // Scale and center the 1920x1080 preview into the UI component bounds
+            float scaleX = (float)clipArea.getWidth() / 1920.0f;
+            float scaleY = (float)clipArea.getHeight() / 1080.0f;
+            float scale = std::min(scaleX, scaleY);
+            
+            float ox = ((float)clipArea.getWidth() - (1920.0f * scale)) * 0.5f;
+            float oy = ((float)clipArea.getHeight() - (1080.0f * scale)) * 0.5f;
+            
+            g.addTransform(juce::AffineTransform::translation(ox, oy).scaled(scale));
+            
+            mediaEngine.renderClip(g, clip, 1920.0f, 1080.0f, 1.0f);
         }
         else
         {
@@ -91,8 +101,7 @@ void MonitorComponent::SingleMonitor::paint(juce::Graphics& g)
         auto& compFrame = mediaEngine.getCompositionFrame();
         if (!compFrame.isNull())
         {
-            g.drawImage(compFrame, 0, 0, clipArea.getWidth(), clipArea.getHeight(),
-                        0, 0, compFrame.getWidth(), compFrame.getHeight());
+            g.drawImageWithin(compFrame, 0, 0, clipArea.getWidth(), clipArea.getHeight(), juce::RectanglePlacement::centred);
         }
         else
         {

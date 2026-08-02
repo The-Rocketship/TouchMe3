@@ -19,7 +19,7 @@ SolidColourNode::SolidColourNode(int id, int x, int y)
     colour = c;
 }
 
-void SolidColourNode::process(juce::Image& target, double time)
+void SolidColourNode::process(juce::Image& target, const std::vector<juce::Image>& inputs, double time)
 {
     juce::Graphics g(target);
     g.fillAll(colour.eval(time));
@@ -30,7 +30,7 @@ OutputNode::OutputNode(int id, int x, int y)
 {
 }
 
-void OutputNode::process(juce::Image& target, double time)
+void OutputNode::process(juce::Image& target, const std::vector<juce::Image>& inputs, double time)
 {
 }
 
@@ -39,7 +39,7 @@ LineNode::LineNode(int id, int x, int y)
 {
 }
 
-void LineNode::process(juce::Image& target, double time)
+void LineNode::process(juce::Image& target, const std::vector<juce::Image>& inputs, double time)
 {
     juce::Graphics g(target);
     g.setColour(colour.eval(time));
@@ -205,7 +205,7 @@ namespace NoiseHelpers
     }
 }
 
-void NoiseNode::process(juce::Image& target, double time)
+void NoiseNode::process(juce::Image& target, const std::vector<juce::Image>& inputs, double time)
 {
     const int W = target.getWidth();
     const int H = target.getHeight();
@@ -384,17 +384,201 @@ CompositeNode::CompositeNode(int id, int x, int y)
 {
 }
 
-void CompositeNode::process(juce::Image& target, double time)
+void CompositeNode::process(juce::Image& target, const std::vector<juce::Image>& inputs, double time)
 {
+    juce::Image imgA = (inputs.size() > 0) ? inputs[0] : juce::Image();
+    juce::Image imgB = (inputs.size() > 1) ? inputs[1] : juce::Image();
+
+    {
+        juce::Graphics g(target);
+        if (imgA.isValid())
+        {
+            g.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
+            g.drawImageTransformed(imgA, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgA.getBounds().toFloat(), target.getBounds().toFloat()));
+        }
+    }
+
+    if (imgB.isValid())
+    {
+        if (blendMode == 0) // Normal
+        {
+            juce::Graphics g(target);
+            g.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
+            g.drawImageTransformed(imgB, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgB.getBounds().toFloat(), target.getBounds().toFloat()));
+        }
+        else
+        {
+            juce::Image scaledB(juce::Image::ARGB, target.getWidth(), target.getHeight(), true);
+            {
+                juce::Graphics gb(scaledB);
+                gb.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
+                gb.drawImageTransformed(imgB, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgB.getBounds().toFloat(), scaledB.getBounds().toFloat()));
+            }
+
+            juce::Image::BitmapData dataOut(target, juce::Image::BitmapData::readWrite);
+            juce::Image::BitmapData dataB(scaledB, juce::Image::BitmapData::readOnly);
+
+            for (int y = 0; y < target.getHeight(); ++y)
+            {
+                auto* pOut = (juce::PixelARGB*)dataOut.getLinePointer(y);
+                auto* pB = (juce::PixelARGB*)dataB.getLinePointer(y);
+
+                for (int x = 0; x < target.getWidth(); ++x)
+                {
+                    if (pB->getAlpha() > 0)
+                    {
+                        juce::PixelARGB ca = *pOut;
+                        juce::PixelARGB cb = *pB;
+                        juce::PixelARGB cout = ca;
+                        
+                        int alphaB = cb.getAlpha();
+
+                        if (blendMode == 1) // Add
+                        {
+                            cout.setARGB(alphaB,
+                                juce::jmin(255, ca.getRed() + cb.getRed()),
+                                juce::jmin(255, ca.getGreen() + cb.getGreen()),
+                                juce::jmin(255, ca.getBlue() + cb.getBlue()));
+                        }
+                        else if (blendMode == 2) // Multiply
+                        {
+                            cout.setARGB(alphaB,
+                                (ca.getRed() * cb.getRed()) / 255,
+                                (ca.getGreen() * cb.getGreen()) / 255,
+                                (ca.getBlue() * cb.getBlue()) / 255);
+                        }
+                        else if (blendMode == 3) // Screen
+                        {
+                            cout.setARGB(alphaB,
+                                255 - ((255 - ca.getRed()) * (255 - cb.getRed())) / 255,
+                                255 - ((255 - ca.getGreen()) * (255 - cb.getGreen())) / 255,
+                                255 - ((255 - ca.getBlue()) * (255 - cb.getBlue())) / 255);
+                        }
+                        
+                        pOut->blend(cout);
+                    }
+                    pOut++;
+                    pB++;
+                }
+            }
+        }
+    }
 }
 
 DisplacementNode::DisplacementNode(int id, int x, int y) : BaseNode(id, "Displacement", x, y) {}
 
-void DisplacementNode::process(juce::Image& target, double time) {}
+void DisplacementNode::process(juce::Image& target, const std::vector<juce::Image>& inputs, double time)
+{
+    juce::Image imgA = (inputs.size() > 0) ? inputs[0] : juce::Image();
+    juce::Image imgB = (inputs.size() > 1) ? inputs[1] : juce::Image();
+
+    if (imgA.isValid())
+    {
+        if (!imgB.isValid())
+        {
+            juce::Graphics g(target);
+            g.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
+            g.drawImageTransformed(imgA, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgA.getBounds().toFloat(), target.getBounds().toFloat()));
+        }
+        else
+        {
+            juce::Image scaledA(juce::Image::ARGB, target.getWidth(), target.getHeight(), true);
+            {
+                juce::Graphics ga(scaledA);
+                ga.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
+                ga.drawImageTransformed(imgA, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgA.getBounds().toFloat(), scaledA.getBounds().toFloat()));
+            }
+
+            juce::Image scaledB(juce::Image::ARGB, target.getWidth(), target.getHeight(), true);
+            {
+                juce::Graphics gb(scaledB);
+                gb.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
+                gb.drawImageTransformed(imgB, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgB.getBounds().toFloat(), scaledB.getBounds().toFloat()));
+            }
+
+            juce::Image::BitmapData dataOut(target, juce::Image::BitmapData::readWrite);
+            juce::Image::BitmapData dataA(scaledA, juce::Image::BitmapData::readOnly);
+            juce::Image::BitmapData dataB(scaledB, juce::Image::BitmapData::readOnly);
+
+            int w = target.getWidth();
+            int h = target.getHeight();
+            
+            float ax = amountX.eval(time);
+            float ay = amountY.eval(time);
+
+            for (int y = 0; y < h; ++y)
+            {
+                auto* pOut = (juce::PixelARGB*)dataOut.getLinePointer(y);
+                auto* pB = (juce::PixelARGB*)dataB.getLinePointer(y);
+
+                for (int x = 0; x < w; ++x)
+                {
+                    float dx = ((pB->getRed() / 255.0f) * 2.0f - 1.0f) * ax * w;
+                    float dy = ((pB->getGreen() / 255.0f) * 2.0f - 1.0f) * ay * h;
+
+                    int sx = juce::jlimit(0, w - 1, x + (int)dx);
+                    int sy = juce::jlimit(0, h - 1, y + (int)dy);
+
+                    *pOut = *((juce::PixelARGB*)dataA.getLinePointer(sy) + sx);
+
+                    pOut++;
+                    pB++;
+                }
+            }
+        }
+    }
+}
 
 EdgeDetectionNode::EdgeDetectionNode(int id, int x, int y) : BaseNode(id, "Edge Detection", x, y) {}
 
-void EdgeDetectionNode::process(juce::Image& target, double time) {}
+void EdgeDetectionNode::process(juce::Image& target, const std::vector<juce::Image>& inputs, double time)
+{
+    juce::Image imgA = (inputs.size() > 0) ? inputs[0] : juce::Image();
+
+    if (imgA.isValid())
+    {
+        juce::Image scaledA(juce::Image::ARGB, target.getWidth(), target.getHeight(), true);
+        {
+            juce::Graphics ga(scaledA);
+            ga.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
+            ga.drawImageTransformed(imgA, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgA.getBounds().toFloat(), scaledA.getBounds().toFloat()));
+        }
+
+        juce::Image::BitmapData dataOut(target, juce::Image::BitmapData::readWrite);
+        juce::Image::BitmapData dataA(scaledA, juce::Image::BitmapData::readOnly);
+
+        int w = target.getWidth();
+        int h = target.getHeight();
+        
+        float intensity_val = intensity.eval(time);
+
+        for (int y = 1; y < h - 1; ++y)
+        {
+            auto* pOut = (juce::PixelARGB*)dataOut.getLinePointer(y);
+            auto* pA_up = (juce::PixelARGB*)dataA.getLinePointer(y - 1);
+            auto* pA = (juce::PixelARGB*)dataA.getLinePointer(y);
+            auto* pA_down = (juce::PixelARGB*)dataA.getLinePointer(y + 1);
+
+            for (int x = 1; x < w - 1; ++x)
+            {
+                auto brightness = [](const juce::PixelARGB& p) {
+                    return (p.getRed() + p.getGreen() + p.getBlue()) / 3;
+                };
+
+                int vUp = brightness(pA_up[x]);
+                int vDown = brightness(pA_down[x]);
+                int vLeft = brightness(pA[x - 1]);
+                int vRight = brightness(pA[x + 1]);
+                int vCenter = brightness(pA[x]);
+
+                int val = vCenter * 4 - vUp - vDown - vLeft - vRight;
+                val = juce::jlimit(0, 255, (int)(abs(val) * intensity_val));
+
+                pOut[x].setARGB(255, val, val, val);
+            }
+        }
+    }
+}
 
 //==============================================================================
 // ShaderToyNode
@@ -430,7 +614,7 @@ void ShaderToyNode::applyShader()
     }
 }
 
-void ShaderToyNode::process(juce::Image& target, double time)
+void ShaderToyNode::process(juce::Image& target, const std::vector<juce::Image>& inputs, double time)
 {
     // Lazy init — must be on the message thread
     if (renderer == nullptr)
@@ -500,223 +684,22 @@ juce::Image NodeGraph::evaluateNode(int nodeId, double time)
     auto node = getNode(nodeId);
     if (!node) return juce::Image();
 
+    // Gather inputs for this node
+    int numInputs = node->getNumInputPins();
+    std::vector<juce::Image> inputs(numInputs);
+    for (const auto& link : links)
+    {
+        if (link.toNodeId == nodeId && link.toPinIndex < numInputs)
+        {
+            inputs[link.toPinIndex] = evaluateNode(link.fromNodeId, time);
+        }
+    }
+
     // Create intermediate image for this node
     juce::Image result(juce::Image::ARGB, node->resolutionX, node->resolutionY, true);
     result.clear(result.getBounds(), juce::Colours::transparentBlack);
 
-    if (auto* composite = dynamic_cast<CompositeNode*>(node.get()))
-    {
-        juce::Image imgA, imgB;
-        for (const auto& link : links)
-        {
-            if (link.toNodeId == nodeId)
-            {
-                if (link.toPinIndex == 0) imgA = evaluateNode(link.fromNodeId, time);
-                if (link.toPinIndex == 1) imgB = evaluateNode(link.fromNodeId, time);
-            }
-        }
-
-        {
-            juce::Graphics g(result);
-            if (imgA.isValid())
-            {
-                g.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
-                g.drawImageTransformed(imgA, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgA.getBounds().toFloat(), result.getBounds().toFloat()));
-            }
-        }
-
-        if (imgB.isValid())
-        {
-            if (composite->blendMode == 0) // Normal
-            {
-                juce::Graphics g(result);
-                g.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
-                g.drawImageTransformed(imgB, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgB.getBounds().toFloat(), result.getBounds().toFloat()));
-            }
-            else
-            {
-                juce::Image scaledB(juce::Image::ARGB, result.getWidth(), result.getHeight(), true);
-                {
-                    juce::Graphics gb(scaledB);
-                    gb.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
-                    gb.drawImageTransformed(imgB, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgB.getBounds().toFloat(), scaledB.getBounds().toFloat()));
-                }
-
-                juce::Image::BitmapData dataOut(result, juce::Image::BitmapData::readWrite);
-                juce::Image::BitmapData dataB(scaledB, juce::Image::BitmapData::readOnly);
-
-                for (int y = 0; y < result.getHeight(); ++y)
-                {
-                    auto* pOut = (juce::PixelARGB*)dataOut.getLinePointer(y);
-                    auto* pB = (juce::PixelARGB*)dataB.getLinePointer(y);
-
-                    for (int x = 0; x < result.getWidth(); ++x)
-                    {
-                        if (pB->getAlpha() > 0)
-                        {
-                            juce::PixelARGB ca = *pOut;
-                            juce::PixelARGB cb = *pB;
-                            juce::PixelARGB cout = ca;
-                            
-                            int alphaB = cb.getAlpha();
-
-                            if (composite->blendMode == 1) // Add
-                            {
-                                cout.setARGB(alphaB,
-                                    juce::jmin(255, ca.getRed() + cb.getRed()),
-                                    juce::jmin(255, ca.getGreen() + cb.getGreen()),
-                                    juce::jmin(255, ca.getBlue() + cb.getBlue()));
-                            }
-                            else if (composite->blendMode == 2) // Multiply
-                            {
-                                cout.setARGB(alphaB,
-                                    (ca.getRed() * cb.getRed()) / 255,
-                                    (ca.getGreen() * cb.getGreen()) / 255,
-                                    (ca.getBlue() * cb.getBlue()) / 255);
-                            }
-                            else if (composite->blendMode == 3) // Screen
-                            {
-                                cout.setARGB(alphaB,
-                                    255 - ((255 - ca.getRed()) * (255 - cb.getRed())) / 255,
-                                    255 - ((255 - ca.getGreen()) * (255 - cb.getGreen())) / 255,
-                                    255 - ((255 - ca.getBlue()) * (255 - cb.getBlue())) / 255);
-                            }
-                            
-                            pOut->blend(cout);
-                        }
-                        pOut++;
-                        pB++;
-                    }
-                }
-            }
-        }
-    }
-    else if (auto* disp = dynamic_cast<DisplacementNode*>(node.get()))
-    {
-        juce::Image imgA, imgB;
-        for (const auto& link : links)
-        {
-            if (link.toNodeId == nodeId)
-            {
-                if (link.toPinIndex == 0) imgA = evaluateNode(link.fromNodeId, time);
-                if (link.toPinIndex == 1) imgB = evaluateNode(link.fromNodeId, time);
-            }
-        }
-
-        if (imgA.isValid())
-        {
-            if (!imgB.isValid())
-            {
-                juce::Graphics g(result);
-                g.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
-                g.drawImageTransformed(imgA, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgA.getBounds().toFloat(), result.getBounds().toFloat()));
-            }
-            else
-            {
-                juce::Image scaledA(juce::Image::ARGB, result.getWidth(), result.getHeight(), true);
-                {
-                    juce::Graphics ga(scaledA);
-                    ga.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
-                    ga.drawImageTransformed(imgA, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgA.getBounds().toFloat(), scaledA.getBounds().toFloat()));
-                }
-
-                juce::Image scaledB(juce::Image::ARGB, result.getWidth(), result.getHeight(), true);
-                {
-                    juce::Graphics gb(scaledB);
-                    gb.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
-                    gb.drawImageTransformed(imgB, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgB.getBounds().toFloat(), scaledB.getBounds().toFloat()));
-                }
-
-                juce::Image::BitmapData dataOut(result, juce::Image::BitmapData::readWrite);
-                juce::Image::BitmapData dataA(scaledA, juce::Image::BitmapData::readOnly);
-                juce::Image::BitmapData dataB(scaledB, juce::Image::BitmapData::readOnly);
-
-                int w = result.getWidth();
-                int h = result.getHeight();
-                
-                float ax = disp->amountX.eval(time);
-                float ay = disp->amountY.eval(time);
-
-                for (int y = 0; y < h; ++y)
-                {
-                    auto* pOut = (juce::PixelARGB*)dataOut.getLinePointer(y);
-                    auto* pB = (juce::PixelARGB*)dataB.getLinePointer(y);
-
-                    for (int x = 0; x < w; ++x)
-                    {
-                        float dx = ((pB->getRed() / 255.0f) * 2.0f - 1.0f) * ax * w;
-                        float dy = ((pB->getGreen() / 255.0f) * 2.0f - 1.0f) * ay * h;
-
-                        int sx = juce::jlimit(0, w - 1, x + (int)dx);
-                        int sy = juce::jlimit(0, h - 1, y + (int)dy);
-
-                        *pOut = *((juce::PixelARGB*)dataA.getLinePointer(sy) + sx);
-
-                        pOut++;
-                        pB++;
-                    }
-                }
-            }
-        }
-    }
-    else if (auto* edge = dynamic_cast<EdgeDetectionNode*>(node.get()))
-    {
-        juce::Image imgA;
-        for (const auto& link : links)
-        {
-            if (link.toNodeId == nodeId && link.toPinIndex == 0)
-                imgA = evaluateNode(link.fromNodeId, time);
-        }
-
-        if (imgA.isValid())
-        {
-            juce::Image scaledA(juce::Image::ARGB, result.getWidth(), result.getHeight(), true);
-            {
-                juce::Graphics ga(scaledA);
-                ga.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
-                ga.drawImageTransformed(imgA, juce::RectanglePlacement(juce::RectanglePlacement::stretchToFit).getTransformToFit(imgA.getBounds().toFloat(), scaledA.getBounds().toFloat()));
-            }
-
-            juce::Image::BitmapData dataOut(result, juce::Image::BitmapData::readWrite);
-            juce::Image::BitmapData dataA(scaledA, juce::Image::BitmapData::readOnly);
-
-            int w = result.getWidth();
-            int h = result.getHeight();
-            
-            float intensity = edge->intensity.eval(time);
-
-            for (int y = 1; y < h - 1; ++y)
-            {
-                auto* pOut = (juce::PixelARGB*)dataOut.getLinePointer(y);
-                auto* pA_up = (juce::PixelARGB*)dataA.getLinePointer(y - 1);
-                auto* pA = (juce::PixelARGB*)dataA.getLinePointer(y);
-                auto* pA_down = (juce::PixelARGB*)dataA.getLinePointer(y + 1);
-
-                for (int x = 1; x < w - 1; ++x)
-                {
-                    auto brightness = [](const juce::PixelARGB& p) {
-                        return (p.getRed() + p.getGreen() + p.getBlue()) / 3;
-                    };
-
-                    int vUp = brightness(pA_up[x]);
-                    int vDown = brightness(pA_down[x]);
-                    int vLeft = brightness(pA[x - 1]);
-                    int vRight = brightness(pA[x + 1]);
-                    int vCenter = brightness(pA[x]);
-
-                    int val = vCenter * 4 - vUp - vDown - vLeft - vRight;
-                    val = juce::jlimit(0, 255, (int)(abs(val) * intensity));
-
-                    pOut[x].setARGB(255, val, val, val);
-                }
-            }
-        }
-    }
-    else
-    {
-        // Normal generative node
-        node->process(result, time);
-    }
+    node->process(result, inputs, time);
 
     return result;
 }

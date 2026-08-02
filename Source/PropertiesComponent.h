@@ -25,6 +25,7 @@ public:
 
     // Callbacks to notify parent of changes
     std::function<void()> onPropertiesChanged;
+    std::function<void(const juce::File&)> onFileLoaded;
 
 private:
     juce::String currentHoverPath;
@@ -34,6 +35,8 @@ private:
 
     juce::Label titleLabel;
     juce::Label clipNameLabel;
+    juce::TextButton loadMediaButton;
+    std::unique_ptr<juce::FileChooser> fileChooser;
     
     // Transport
     juce::Label transportTitle;
@@ -85,6 +88,14 @@ private:
     juce::Slider anchorYSlider;
     juce::Label anchorYLabel;
 
+    // Master FX
+    juce::Slider fxVhsSlider;
+    juce::Label fxVhsLabel;
+    juce::Slider fxRgbShiftSlider;
+    juce::Label fxRgbShiftLabel;
+    juce::Slider fxScanlinesSlider;
+    juce::Label fxScanlinesLabel;
+
     std::vector<std::unique_ptr<juce::TextButton>> cogButtons;
     std::map<juce::Slider*, juce::TextButton*> sliderToCogButton;
     std::map<juce::Slider*, std::function<Parameter*()>> sliderToParam;
@@ -99,6 +110,7 @@ private:
     bool scaleCollapsed = false;
     bool rotationCollapsed = false;
     bool anchorCollapsed = false;
+    bool masterFxCollapsed = false;
 
     struct CollapsibleHeader : public juce::Component
     {
@@ -139,6 +151,7 @@ private:
     std::unique_ptr<CollapsibleHeader> scaleHeader;
     std::unique_ptr<CollapsibleHeader> rotationHeader;
     std::unique_ptr<CollapsibleHeader> anchorHeader;
+    std::unique_ptr<CollapsibleHeader> masterFxHeader;
 
     juce::Viewport viewport;
     juce::Component content;

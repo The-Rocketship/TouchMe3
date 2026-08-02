@@ -21,9 +21,12 @@ public:
     // FileDragAndDropTarget implementation
     bool isInterestedInFileDrag(const juce::StringArray& files) override;
     void filesDropped(const juce::StringArray& files, int x, int y) override;
+    void fileDragMove(const juce::StringArray& files, int x, int y) override;
+    void fileDragExit(const juce::StringArray& files) override;
 
     void updateGrid();
     void rebuildUI();
+    void markThumbnailDirty(int layer, int col);
 
 private:
     void mouseDown(const juce::MouseEvent& event) override;
@@ -45,6 +48,8 @@ private:
         std::unique_ptr<juce::TextButton> soloButton;
         std::unique_ptr<juce::TextButton> muteButton;
         std::unique_ptr<juce::TextButton> bypassButton;
+        std::unique_ptr<juce::TextButton> playButton;
+        std::unique_ptr<juce::TextButton> stopButton;
     };
 
     std::vector<LayerControlUI> layerControls;
@@ -58,6 +63,10 @@ private:
 
     std::vector<std::vector<juce::Image>> thumbnailCache;
     std::vector<std::vector<bool>> thumbnailDirty;
+
+    int dragHoverLayer = -1;
+    int dragHoverCol = -1;
+
     void ensureThumbnail(int layer, int col, float w, float h);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipGridComponent)

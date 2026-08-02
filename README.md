@@ -10,11 +10,10 @@ Designed for live VJ performances, projection mapping, visual synthesis, and int
 
 ## ✨ Features
 
-- 🎨 **Node-Based Processing Engine**: Modular node graph layout featuring color controls, noise generators, edge detection, displacement, GLSL ShaderToy node integration, envelopes, and more.
-- 🎛️ **MIDI & OSC Control**: Full hardware mapping capabilities for MIDI controllers and OSC network control.
-- 📐 **Advanced Output Warping**: Multi-display projector warping, edge blending, and grid transformations.
-- 📼 **Hardware Accelerated Media Playback**: Native high-speed decoding powered by FFmpeg.
-- ⚡ **Real-Time GLSL Shader Support**: Live editing and execution of customized GLSL visual shaders.
+- 🎨 **Node-Based Processing Engine**: Modular node graph layout featuring solid color generation, line generation, noise generators, edge detection, displacement, and GLSL ShaderToy node integration.
+- 🎛️ **MIDI & OSC Control**: Hardware mapping capabilities for MIDI controllers and OSC network control.
+- 📼 **Hardware Accelerated Media Playback**: Native decoding powered by FFmpeg.
+- ⚡ **Real-Time GLSL Shader Support**: Execution of GLSL visual shaders via ShaderToy nodes.
 
 ---
 

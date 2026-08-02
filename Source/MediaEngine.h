@@ -22,8 +22,8 @@ struct TransformState
     Parameter opacity{1.0f};
     int blendMode = 0;      // 0: Normal, 1: Add, 2: Subtract, 3: Multiply
     int alphaType = 0;      // 0: Premultiplied, 1: Straight
-    int width = 1280;
-    int height = 720;
+    int width = 1920;
+    int height = 1080;
 };
 
 struct TransportState
@@ -53,14 +53,21 @@ struct ClipState
     std::shared_ptr<foleys::AVClip> videoClip;
 };
 
-class MediaEngine
+class MediaEngine : public juce::AudioIODeviceCallback
 {
 public:
     SettingsManager settingsManager;
     foleys::VideoEngine videoEngine;
     MappingManager mappingManager;
     MediaEngine();
-    ~MediaEngine() = default;
+    ~MediaEngine() override = default;
+
+    void audioDeviceAboutToStart (juce::AudioIODevice* device) override {}
+    void audioDeviceStopped() override {}
+    void audioDeviceIOCallbackWithContext (const float* const* inputChannelData, int numInputChannels,
+                                           float* const* outputChannelData, int numOutputChannels,
+                                           int numSamples, const juce::AudioIODeviceCallbackContext& context) override;
+
 
     // Update playhead positions based on time elapsed
     void update(double deltaTimeSeconds);
@@ -82,11 +89,18 @@ public:
     int getSelectedCol() const { return selectedCol; }
     void setSelectedCol(int col) { selectedCol = col; }
 
+    std::atomic<float> fxVhs{0.0f};
+    std::atomic<float> fxRgbShift{0.0f};
+    std::atomic<float> fxScanlines{0.0f};
+
     double getLayerOpacity(int layerIdx) const { return (layerIdx >= 0 && layerIdx < getNumLayers()) ? layerOpacities[layerIdx] : 1.0; }
     void setLayerOpacity(int layerIdx, double opacity) { if (layerIdx >= 0 && layerIdx < getNumLayers()) layerOpacities[layerIdx] = opacity; }
 
     bool isLayerBypassed(int layerIdx) const { return (layerIdx >= 0 && layerIdx < getNumLayers()) ? layerBypassed[layerIdx] : false; }
     void setLayerBypassed(int layerIdx, bool bypassed) { if (layerIdx >= 0 && layerIdx < getNumLayers()) layerBypassed[layerIdx] = bypassed; }
+    
+    bool isLayerMuted(int layerIdx) const { return (layerIdx >= 0 && layerIdx < getNumLayers()) ? layerMuted[layerIdx] : false; }
+    void setLayerMuted(int layerIdx, bool muted) { if (layerIdx >= 0 && layerIdx < getNumLayers()) layerMuted[layerIdx] = muted; }
 
     int getSoloedLayer() const { return soloedLayer; }
     void setSoloedLayer(int layerIdx) { soloedLayer = layerIdx; }
@@ -96,6 +110,14 @@ public:
 
     void removeLayer(int layerIdx);
     void removeColumn(int colIdx);
+    
+    void addLayer();
+    void clearLayer(int layerIdx);
+    void triggerColumn(int colIdx);
+    void clearColumn(int colIdx);
+    void clearClip(int layerIdx, int colIdx);
+    void clearDeck();
+
     void updateCompositionFrame();
     const juce::Image& getCompositionFrame() const { return compositionFrame; }
 
@@ -113,6 +135,7 @@ private:
 
     std::vector<double> layerOpacities;
     std::vector<bool> layerBypassed;
+    std::vector<bool> layerMuted;
     int soloedLayer = -1;
 
     int selectedLayer = -1;

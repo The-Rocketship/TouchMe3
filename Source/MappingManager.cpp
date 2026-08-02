@@ -7,7 +7,7 @@ MappingManager::MappingManager()
 
 void MappingManager::setupFromSettings(int oscInPort, int oscOutPort, const juce::StringArray& midiDevices)
 {
-    deviceManager.initialise(0, 0, nullptr, true);
+    deviceManager.initialise(0, 2, nullptr, true);
     setMidiDevices(midiDevices);
     reconnectOscIn(oscInPort);
     reconnectOscOut(oscOutPort);

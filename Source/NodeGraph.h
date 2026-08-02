@@ -12,7 +12,7 @@ public:
     BaseNode(int id, const juce::String& name, int x, int y);
     virtual ~BaseNode() = default;
 
-    virtual void process(juce::Image& target, double time) = 0;
+    virtual void process(juce::Image& target, const std::vector<juce::Image>& inputs, double time) = 0;
 
     virtual int getNumInputPins() const { return 1; }
     virtual int getNumOutputPins() const { return 1; }
@@ -33,7 +33,7 @@ class SolidColourNode : public BaseNode
 {
 public:
     SolidColourNode(int id, int x, int y);
-    void process(juce::Image& target, double time) override;
+    void process(juce::Image& target, const std::vector<juce::Image>& inputs, double time) override;
 
     int getNumInputPins() const override { return 0; }
 
@@ -44,7 +44,7 @@ class OutputNode : public BaseNode
 {
 public:
     OutputNode(int id, int x, int y);
-    void process(juce::Image& target, double time) override;
+    void process(juce::Image& target, const std::vector<juce::Image>& inputs, double time) override;
 
     int getNumOutputPins() const override { return 0; }
 };
@@ -53,7 +53,7 @@ class LineNode : public BaseNode
 {
 public:
     LineNode(int id, int x, int y);
-    void process(juce::Image& target, double time) override;
+    void process(juce::Image& target, const std::vector<juce::Image>& inputs, double time) override;
 
     int getNumInputPins() const override { return 0; }
 
@@ -96,7 +96,7 @@ class NoiseNode : public BaseNode
 {
 public:
     NoiseNode(int id, int x, int y);
-    void process(juce::Image& target, double time) override;
+    void process(juce::Image& target, const std::vector<juce::Image>& inputs, double time) override;
 
     int getNumInputPins() const override { return 0; }
 
@@ -143,7 +143,7 @@ class CompositeNode : public BaseNode
 {
 public:
     CompositeNode(int id, int x, int y);
-    void process(juce::Image& target, double time) override;
+    void process(juce::Image& target, const std::vector<juce::Image>& inputs, double time) override;
 
     int getNumInputPins() const override { return 2; }
 
@@ -154,7 +154,7 @@ class DisplacementNode : public BaseNode
 {
 public:
     DisplacementNode(int id, int x, int y);
-    void process(juce::Image& target, double time) override;
+    void process(juce::Image& target, const std::vector<juce::Image>& inputs, double time) override;
 
     int getNumInputPins() const override { return 2; }
 
@@ -174,7 +174,7 @@ class EdgeDetectionNode : public BaseNode
 {
 public:
     EdgeDetectionNode(int id, int x, int y);
-    void process(juce::Image& target, double time) override;
+    void process(juce::Image& target, const std::vector<juce::Image>& inputs, double time) override;
 
     int getNumInputPins() const override { return 1; }
 
@@ -193,7 +193,7 @@ class ShaderToyNode : public BaseNode
 public:
     ShaderToyNode(int id, int x, int y);
     ~ShaderToyNode() override;
-    void process(juce::Image& target, double time) override;
+    void process(juce::Image& target, const std::vector<juce::Image>& inputs, double time) override;
 
     int getNumInputPins() const override { return 1; }
 

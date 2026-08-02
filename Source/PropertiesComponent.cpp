@@ -29,7 +29,7 @@ PropertiesComponent::PropertiesComponent(MediaEngine& engine)
         sld.setColour(juce::Slider::thumbColourId, juce::Colours::white);
         
         sld.onValueChange = [this] {
-            if (!isUpdatingFromCode && onPropertiesChanged)
+            if (onPropertiesChanged)
                 onPropertiesChanged();
         };
 
@@ -69,6 +69,27 @@ PropertiesComponent::PropertiesComponent(MediaEngine& engine)
     makeLabel(clipNameLabel, "- No Clip Selected -", 11.0f, false);
     clipNameLabel.setColour(juce::Label::textColourId, juce::Colour(0xffa1a1aa));
 
+    content.addAndMakeVisible(loadMediaButton);
+    loadMediaButton.setButtonText("Load Media...");
+    loadMediaButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d30));
+    loadMediaButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    loadMediaButton.onClick = [this] {
+        if (!currentClip) return;
+        
+        fileChooser = std::make_unique<juce::FileChooser>("Select a media file...",
+                                                          juce::File::getSpecialLocation(juce::File::userHomeDirectory),
+                                                          "*.mp4;*.mov;*.avi;*.png;*.jpg;*.jpeg");
+        
+        auto chooserFlags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
+        fileChooser->launchAsync(chooserFlags, [this](const juce::FileChooser& fc) {
+            auto result = fc.getResult();
+            if (result.existsAsFile() && onFileLoaded)
+            {
+                onFileLoaded(result);
+            }
+        });
+    };
+
     // Section headers configuration
     auto onToggle = [this] {
         resized();
@@ -93,27 +114,28 @@ PropertiesComponent::PropertiesComponent(MediaEngine& engine)
     anchorHeader = std::make_unique<CollapsibleHeader>("Anchor", anchorCollapsed, onToggle);
     content.addAndMakeVisible(*anchorHeader);
 
+    masterFxHeader = std::make_unique<CollapsibleHeader>("Master FX", masterFxCollapsed, onToggle);
+    content.addAndMakeVisible(*masterFxHeader);
+
     // Section 1: Transport
     content.addAndMakeVisible(playPauseButton);
     playPauseButton.setButtonText("Play");
     playPauseButton.setClickingTogglesState(true);
-    playPauseButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d30));
-    playPauseButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff00f0a8));
-    playPauseButton.setColour(juce::TextButton::textColourOnId, juce::Colours::black);
     playPauseButton.onClick = [this] {
-        if (!isUpdatingFromCode && onPropertiesChanged)
-            onPropertiesChanged();
+        if (isUpdatingFromCode) return;
+        if (currentClip != nullptr) {
+            currentClip->transport.isPlaying = playPauseButton.getToggleState();
+        }
     };
 
     content.addAndMakeVisible(loopButton);
     loopButton.setButtonText("Loop");
     loopButton.setClickingTogglesState(true);
-    loopButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2d2d30));
-    loopButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff10ffd0));
-    loopButton.setColour(juce::TextButton::textColourOnId, juce::Colours::black);
     loopButton.onClick = [this] {
-        if (!isUpdatingFromCode && onPropertiesChanged)
-            onPropertiesChanged();
+        if (isUpdatingFromCode) return;
+        if (currentClip != nullptr) {
+            currentClip->transport.loop = loopButton.getToggleState();
+        }
     };
 
     makeSlider(speedSlider, speedLabel, "Speed", 0.0, 10.0, 0.1, 1.0);
@@ -122,8 +144,8 @@ PropertiesComponent::PropertiesComponent(MediaEngine& engine)
 
     // Section 2: Video Size & Opacity
     makeSlider(opacitySlider, opacityLabel, "Opacity", 0.0, 1.0, 0.01, 1.0, [this]() { return currentClip ? &currentClip->transform.opacity : nullptr; });
-    makeSlider(widthSlider, widthLabel, "Width", 100.0, 3840.0, 1.0, 1280.0, nullptr);
-    makeSlider(heightSlider, heightLabel, "Height", 100.0, 2160.0, 1.0, 720.0, nullptr);
+    makeSlider(widthSlider, widthLabel, "Width", 100.0, 3840.0, 1.0, 1920.0, nullptr);
+    makeSlider(heightSlider, heightLabel, "Height", 100.0, 2160.0, 1.0, 1080.0, nullptr);
 
     // Section 3: Transform (Position)
     makeSlider(posXSlider, posXLabel, "Position X", -1000.0, 1000.0, 1.0, 0.0, [this]() { return currentClip ? &currentClip->transform.posX : nullptr; });
@@ -142,6 +164,15 @@ PropertiesComponent::PropertiesComponent(MediaEngine& engine)
     // Section 6: Anchor
     makeSlider(anchorXSlider, anchorXLabel, "Anchor X", 0.0, 1.0, 0.01, 0.5, [this]() { return currentClip ? &currentClip->transform.anchorX : nullptr; });
     makeSlider(anchorYSlider, anchorYLabel, "Anchor Y", 0.0, 1.0, 0.01, 0.5, [this]() { return currentClip ? &currentClip->transform.anchorY : nullptr; });
+
+    // Master FX sliders do not use envelopes for now, just direct mapping
+    makeSlider(fxVhsSlider, fxVhsLabel, "VHS Glitch", 0.0, 1.0, 0.01, 0.0, nullptr);
+    makeSlider(fxRgbShiftSlider, fxRgbShiftLabel, "RGB Shift", 0.0, 1.0, 0.01, 0.0, nullptr);
+    makeSlider(fxScanlinesSlider, fxScanlinesLabel, "Scanlines", 0.0, 1.0, 0.01, 0.0, nullptr);
+
+    fxVhsSlider.onValueChange = [this] { mediaEngine.fxVhs.store(fxVhsSlider.getValue()); };
+    fxRgbShiftSlider.onValueChange = [this] { mediaEngine.fxRgbShift.store(fxRgbShiftSlider.getValue()); };
+    fxScanlinesSlider.onValueChange = [this] { mediaEngine.fxScanlines.store(fxScanlinesSlider.getValue()); };
 }
 
 void PropertiesComponent::paint(juce::Graphics& g)
@@ -300,7 +331,10 @@ void PropertiesComponent::resized()
     y += 20;
     
     clipNameLabel.setBounds(margin, y, w, 18);
-    y += 18 + 10; // spacing
+    y += 18 + 4; // spacing
+
+    loadMediaButton.setBounds(margin, y, w, 24);
+    y += 24 + 10; // spacing
 
     auto layoutSectionHeader = [&](std::unique_ptr<CollapsibleHeader>& header, const juce::String& name) {
         header->setBounds(margin, y, w, 22);
@@ -386,8 +420,15 @@ void PropertiesComponent::resized()
     layoutSlider(anchorXSlider, anchorXLabel, !anchorCollapsed);
     layoutSlider(anchorYSlider, anchorYLabel, !anchorCollapsed);
 
+    y += 4;
+
+    // 7. Master FX Section
+    layoutSectionHeader(masterFxHeader, "- Master FX");
+    layoutSlider(fxVhsSlider, fxVhsLabel, !masterFxCollapsed);
+    layoutSlider(fxRgbShiftSlider, fxRgbShiftLabel, !masterFxCollapsed);
+    layoutSlider(fxScanlinesSlider, fxScanlinesLabel, !masterFxCollapsed);
+
     y += 10; // bottom margin
-    
     content.setBounds(0, 0, scrollWidth, y);
 }
 
@@ -406,12 +447,16 @@ void PropertiesComponent::updateDetails(const ClipState& clip)
         sld.getProperties().set("mappingPath", "/layer/" + layerStr + "/" + name);
     };
 
+    if (currentClip != nullptr) {
+        isUpdatingFromCode = true;
+        playPauseButton.setToggleState(currentClip->transport.isPlaying, juce::dontSendNotification);
+        loopButton.setToggleState(currentClip->transport.loop, juce::dontSendNotification);
+        isUpdatingFromCode = false;
+    }
+    
     if (clip.isLoaded)
     {
         clipNameLabel.setText(clip.name, juce::dontSendNotification);
-        
-        playPauseButton.setToggleState(clip.transport.isPlaying, juce::dontSendNotification);
-        loopButton.setToggleState(clip.transport.loop, juce::dontSendNotification);
         
         updateSlider(speedSlider, "speed", clip.transport.speed);
         updateSlider(opacitySlider, "opacity", clip.transform.opacity.baseValue);
@@ -511,22 +556,22 @@ void PropertiesComponent::updateTransformFromSliders(ClipState& clip)
     if (!clip.isLoaded)
         return;
 
-    clip.transform.opacity = opacitySlider.getValue();
+    clip.transform.opacity.baseValue = opacitySlider.getValue();
     clip.transform.width = (int)widthSlider.getValue();
     clip.transform.height = (int)heightSlider.getValue();
 
-    clip.transform.posX = posXSlider.getValue();
-    clip.transform.posY = posYSlider.getValue();
+    clip.transform.posX.baseValue = posXSlider.getValue();
+    clip.transform.posY.baseValue = posYSlider.getValue();
 
-    clip.transform.scale = scaleSlider.getValue();
-    clip.transform.scaleX = scaleXSlider.getValue();
-    clip.transform.scaleY = scaleYSlider.getValue();
+    clip.transform.scale.baseValue = scaleSlider.getValue();
+    clip.transform.scaleX.baseValue = scaleXSlider.getValue();
+    clip.transform.scaleY.baseValue = scaleYSlider.getValue();
 
-    clip.transform.rotationX = rotXSlider.getValue();
-    clip.transform.rotationY = rotYSlider.getValue();
-    clip.transform.rotationZ = rotZSlider.getValue();
+    clip.transform.rotationX.baseValue = rotXSlider.getValue();
+    clip.transform.rotationY.baseValue = rotYSlider.getValue();
+    clip.transform.rotationZ.baseValue = rotZSlider.getValue();
 
-    clip.transform.anchorX = anchorXSlider.getValue();
-    clip.transform.anchorY = anchorYSlider.getValue();
+    clip.transform.anchorX.baseValue = anchorXSlider.getValue();
+    clip.transform.anchorY.baseValue = anchorYSlider.getValue();
 }
 

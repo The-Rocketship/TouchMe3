@@ -84,7 +84,32 @@ void ClipGridComponent::rebuildUI()
         ctrl.muteButton->setClickingTogglesState(true);
         ctrl.muteButton->setColour(juce::TextButton::buttonColourId, mediaEngine.settingsManager.getTheme().background);
         ctrl.muteButton->setColour(juce::TextButton::buttonOnColourId, juce::Colours::orange);
+        ctrl.muteButton->onClick = [this, layerIdx] {
+            mediaEngine.setLayerMuted(layerIdx, layerControls[layerIdx].muteButton->getToggleState());
+        };
         addAndMakeVisible(*ctrl.muteButton);
+
+        // Play Button
+        ctrl.playButton = std::make_unique<juce::TextButton>(juce::String::charToString(0x25B6)); // ▶
+        ctrl.playButton->setColour(juce::TextButton::buttonColourId, mediaEngine.settingsManager.getTheme().background);
+        ctrl.playButton->setColour(juce::TextButton::textColourOffId, juce::Colour(0xff00f0a8)); // Neon green
+        ctrl.playButton->onClick = [this, layerIdx] {
+            mediaEngine.getActiveLayerClip(layerIdx).transport.isPlaying = true;
+        };
+        addAndMakeVisible(*ctrl.playButton);
+
+        // Stop Button
+        ctrl.stopButton = std::make_unique<juce::TextButton>(juce::String::charToString(0x25A0)); // ■
+        ctrl.stopButton->setColour(juce::TextButton::buttonColourId, mediaEngine.settingsManager.getTheme().background);
+        ctrl.stopButton->setColour(juce::TextButton::textColourOffId, juce::Colours::red);
+        ctrl.stopButton->onClick = [this, layerIdx] {
+            auto& clip = mediaEngine.getActiveLayerClip(layerIdx);
+            clip.transport.isPlaying = false;
+            if (clip.videoClip != nullptr) {
+                clip.videoClip->setNextReadPosition(0.0); // Reset to start
+            }
+        };
+        addAndMakeVisible(*ctrl.stopButton);
     }
     
     resized();
@@ -201,8 +226,19 @@ void ClipGridComponent::paint(juce::Graphics& g)
             // Outline playing or selected cell
             if (isPlaying)
             {
-                g.setColour(mediaEngine.settingsManager.getTheme().accent1); // Neon green border for playing
-                g.drawRect(x + 1, y + 1, cellWidth - 2, cellHeight - 2, 2);
+                g.setColour(mediaEngine.settingsManager.getTheme().accent1); // Neon green
+                g.drawRect(x + 1, y + 1, cellWidth - 2, cellHeight - 2, 3);
+                
+                // Draw progress bar across bottom 6 pixels
+                double progress = 0.0;
+                if (clip.transport.duration > 0)
+                    progress = clip.transport.position / clip.transport.duration;
+                
+                g.fillRect(x + 2, y + cellHeight - 8, (int)((cellWidth - 4) * progress), 6);
+                
+                // Draw PLAYING badge
+                g.setFont(juce::Font(9.0f, juce::Font::bold));
+                g.drawText("▶ PLAYING", x + cellWidth - 60, y + 4, 55, 12, juce::Justification::right);
             }
             else if (isSelected)
             {
@@ -213,6 +249,14 @@ void ClipGridComponent::paint(juce::Graphics& g)
             {
                 g.setColour(mediaEngine.settingsManager.getTheme().border); // Standard border
                 g.drawRect(x + 1, y + 1, cellWidth - 2, cellHeight - 2, 1);
+            }
+            
+            if (dragHoverLayer == drawLayerIdx && dragHoverCol == c)
+            {
+                g.setColour(juce::Colours::yellow.withAlpha(0.8f));
+                g.drawRect(x + 1, y + 1, cellWidth - 2, cellHeight - 2, 3);
+                g.setColour(juce::Colours::yellow.withAlpha(0.2f));
+                g.fillRect(x + 2, y + 2, cellWidth - 4, cellHeight - 4);
             }
         }
 
@@ -233,11 +277,13 @@ void ClipGridComponent::resized()
         auto& ctrl = layerControls[drawLayerIdx];
         
         // Layout: name at top-left.
-        // Solo/Mute/Bypass buttons on the right.
+        // Play, Stop, Bypass, Solo, Mute buttons on the right.
         // Opacity slider at the bottom.
-        ctrl.bypassButton->setBounds(leftHeaderWidth - 85, y + 4, 22, 18);
-        ctrl.soloButton->setBounds(leftHeaderWidth - 60, y + 4, 22, 18);
-        ctrl.muteButton->setBounds(leftHeaderWidth - 35, y + 4, 22, 18);
+        ctrl.playButton->setBounds(leftHeaderWidth - 110, y + 4, 20, 18);
+        ctrl.stopButton->setBounds(leftHeaderWidth - 88, y + 4, 20, 18);
+        ctrl.bypassButton->setBounds(leftHeaderWidth - 66, y + 4, 20, 18);
+        ctrl.soloButton->setBounds(leftHeaderWidth - 44, y + 4, 20, 18);
+        ctrl.muteButton->setBounds(leftHeaderWidth - 22, y + 4, 20, 18);
         
         ctrl.opacitySlider->setBounds(6, y + 24, leftHeaderWidth - 16, 16);
     }
@@ -426,6 +472,12 @@ bool ClipGridComponent::isInterestedInFileDrag(const juce::StringArray& files)
     return false;
 }
 
+void ClipGridComponent::markThumbnailDirty(int layer, int col)
+{
+    if (layer >= 0 && layer < thumbnailDirty.size() && col >= 0 && col < thumbnailDirty[layer].size())
+        thumbnailDirty[layer][col] = true;
+}
+
 void ClipGridComponent::filesDropped(const juce::StringArray& files, int x, int y)
 {
     int l = -1, c = -1;
@@ -438,17 +490,18 @@ void ClipGridComponent::filesDropped(const juce::StringArray& files, int x, int 
         clip.isProcedural = false;
         clip.isLoaded = true;
 
-        // Try loading as image
-        juce::Image img = juce::ImageFileFormat::loadFrom(file);
-        if (img.isValid())
+        // Try loading as image ONLY if extension is image
+        juce::String ext = file.getFileExtension().toLowerCase();
+        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".gif")
         {
-            clip.image = img;
+            juce::Image img = juce::ImageFileFormat::loadFrom(file);
+            if (img.isValid())
+                clip.image = img;
         }
         else
         {
-            // Just represent as a video mock image placeholder
             clip.image = juce::Image(juce::Image::RGB, 100, 100, true);
-            clip.transport.duration = 10.0; // default initial duration
+            clip.transport.duration = 10.0;
         }
 
         thumbnailDirty[l][c] = true;
@@ -458,7 +511,38 @@ void ClipGridComponent::filesDropped(const juce::StringArray& files, int x, int 
             onClipSelected(l, c);
 
         repaint();
+        repaint();
     }
+    dragHoverLayer = -1;
+    dragHoverCol = -1;
+    repaint();
+}
+
+void ClipGridComponent::fileDragMove(const juce::StringArray& files, int x, int y)
+{
+    int l = -1, c = -1;
+    if (getCellAtPos(juce::Point<int>(x, y), l, c))
+    {
+        if (dragHoverLayer != l || dragHoverCol != c)
+        {
+            dragHoverLayer = l;
+            dragHoverCol = c;
+            repaint();
+        }
+    }
+    else if (dragHoverLayer != -1 || dragHoverCol != -1)
+    {
+        dragHoverLayer = -1;
+        dragHoverCol = -1;
+        repaint();
+    }
+}
+
+void ClipGridComponent::fileDragExit(const juce::StringArray& files)
+{
+    dragHoverLayer = -1;
+    dragHoverCol = -1;
+    repaint();
 }
 
 void ClipGridComponent::updateGrid()

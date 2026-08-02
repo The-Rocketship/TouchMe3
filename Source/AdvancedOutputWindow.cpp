@@ -769,7 +769,7 @@ AdvancedOutputWindow::EditorComponent::EditorComponent(MediaEngine& engine)
                 auto& displays = juce::Desktop::getInstance().getDisplays();
                 if (dispIdx >= 0 && dispIdx < displays.displays.size())
                 {
-                    auto& disp = displays.displays[dispIdx];
+                    const auto& disp = displays.displays[dispIdx];
                     // totalArea is in logical coords; multiply by scale for physical pixels
                     screen.width = (int)(disp.totalArea.getWidth() * disp.scale);
                     screen.height = (int)(disp.totalArea.getHeight() * disp.scale);
@@ -1032,6 +1032,41 @@ AdvancedOutputWindow::EditorComponent::EditorComponent(MediaEngine& engine)
         }
     };
 
+    // 4. Edge Blending Controls
+    addAndMakeVisible(edgeBlendLabel);
+    edgeBlendLabel.setText("Edge Blending", juce::dontSendNotification);
+    edgeBlendLabel.setFont(juce::Font(11.0f, juce::Font::bold));
+    edgeBlendLabel.setColour(juce::Label::textColourId, juce::Colour(0xffa1a1aa));
+
+    auto setupBlendSlider = [this](juce::Slider& sl, juce::Label& lb, const juce::String& text, float maxVal) {
+        addAndMakeVisible(lb);
+        lb.setText(text, juce::dontSendNotification);
+        lb.setFont(10.0f);
+        lb.setColour(juce::Label::textColourId, juce::Colour(0xffa1a1aa));
+
+        addAndMakeVisible(sl);
+        sl.setRange(0.0, maxVal, 0.01);
+        sl.setSliderStyle(juce::Slider::LinearHorizontal);
+        sl.setTextBoxStyle(juce::Slider::TextBoxRight, false, 45, 16);
+        sl.setColour(juce::Slider::trackColourId, juce::Colour(0xff00f0a8));
+        sl.onValueChange = [this, &sl] {
+            if (selectedScreenIdx >= 0 && selectedSliceIdx >= 0) {
+                auto& slice = screens[selectedScreenIdx].slices[selectedSliceIdx];
+                if (&sl == &blendTopSlider) slice.blendTop = (float)sl.getValue();
+                else if (&sl == &blendBottomSlider) slice.blendBottom = (float)sl.getValue();
+                else if (&sl == &blendLeftSlider) slice.blendLeft = (float)sl.getValue();
+                else if (&sl == &blendRightSlider) slice.blendRight = (float)sl.getValue();
+                else if (&sl == &blendGammaSlider) slice.blendGamma = (float)sl.getValue();
+                repaintDeviceWindows();
+            }
+        };
+    };
+    setupBlendSlider(blendTopSlider, blendTopLabel, "Top", 1.0f);
+    setupBlendSlider(blendBottomSlider, blendBottomLabel, "Bottom", 1.0f);
+    setupBlendSlider(blendLeftSlider, blendLeftLabel, "Left", 1.0f);
+    setupBlendSlider(blendRightSlider, blendRightLabel, "Right", 1.0f);
+    setupBlendSlider(blendGammaSlider, blendGammaLabel, "Gamma", 3.0f);
+
     // Default mock data to populate immediately
     addScreen();
     addSlice();
@@ -1165,8 +1200,23 @@ void AdvancedOutputWindow::EditorComponent::resized()
         subdivYLabel.setBounds(subRow.removeFromLeft(20));
         subdivYEditor.setBounds(subRow.removeFromLeft(40));
         
-        rightArea.removeFromTop(8);
+        rightArea.removeFromTop(4);
         resetGridBtn.setBounds(rightArea.removeFromTop(24));
+        rightArea.removeFromTop(10);
+
+        edgeBlendLabel.setBounds(rightArea.removeFromTop(16));
+        rightArea.removeFromTop(4);
+
+        auto layoutBlend = [](juce::Rectangle<int>& area, juce::Label& lb, juce::Slider& sl) {
+            auto row = area.removeFromTop(20);
+            lb.setBounds(row.removeFromLeft(40));
+            sl.setBounds(row);
+        };
+        layoutBlend(rightArea, blendTopLabel, blendTopSlider);
+        layoutBlend(rightArea, blendBottomLabel, blendBottomSlider);
+        layoutBlend(rightArea, blendLeftLabel, blendLeftSlider);
+        layoutBlend(rightArea, blendRightLabel, blendRightSlider);
+        layoutBlend(rightArea, blendGammaLabel, blendGammaSlider);
     }
 }
 
@@ -1234,6 +1284,12 @@ void AdvancedOutputWindow::EditorComponent::selectSlice(int index)
         inputCoordsEditors[3].setText(juce::String((int)slice.inputRect.getHeight()), false);
         subdivXEditor.setText(juce::String(slice.subdivX), false);
         subdivYEditor.setText(juce::String(slice.subdivY), false);
+
+        blendTopSlider.setValue(slice.blendTop, juce::dontSendNotification);
+        blendBottomSlider.setValue(slice.blendBottom, juce::dontSendNotification);
+        blendLeftSlider.setValue(slice.blendLeft, juce::dontSendNotification);
+        blendRightSlider.setValue(slice.blendRight, juce::dontSendNotification);
+        blendGammaSlider.setValue(slice.blendGamma, juce::dontSendNotification);
     }
     updateInspectorVisibility();
     updateLists();
@@ -1333,6 +1389,13 @@ void AdvancedOutputWindow::EditorComponent::updateInspectorVisibility()
         subdivYLabel.setVisible(false);
         subdivYEditor.setVisible(false);
         resetGridBtn.setVisible(false);
+
+        edgeBlendLabel.setVisible(false);
+        blendTopLabel.setVisible(false); blendTopSlider.setVisible(false);
+        blendBottomLabel.setVisible(false); blendBottomSlider.setVisible(false);
+        blendLeftLabel.setVisible(false); blendLeftSlider.setVisible(false);
+        blendRightLabel.setVisible(false); blendRightSlider.setVisible(false);
+        blendGammaLabel.setVisible(false); blendGammaSlider.setVisible(false);
         return;
     }
 
@@ -1384,6 +1447,13 @@ void AdvancedOutputWindow::EditorComponent::updateInspectorVisibility()
     subdivYLabel.setVisible(outputSliceVisible);
     subdivYEditor.setVisible(outputSliceVisible);
     resetGridBtn.setVisible(outputSliceVisible);
+
+    edgeBlendLabel.setVisible(outputSliceVisible);
+    blendTopLabel.setVisible(outputSliceVisible); blendTopSlider.setVisible(outputSliceVisible);
+    blendBottomLabel.setVisible(outputSliceVisible); blendBottomSlider.setVisible(outputSliceVisible);
+    blendLeftLabel.setVisible(outputSliceVisible); blendLeftSlider.setVisible(outputSliceVisible);
+    blendRightLabel.setVisible(outputSliceVisible); blendRightSlider.setVisible(outputSliceVisible);
+    blendGammaLabel.setVisible(outputSliceVisible); blendGammaSlider.setVisible(outputSliceVisible);
 
     resized(); // Re-layout right sidebar controls
 }
@@ -1475,20 +1545,72 @@ void OutputDeviceView::createShaders()
     juce::String vertexShader = R"(
         attribute vec2 position;
         attribute vec2 texCoord;
+        attribute vec2 sliceCoord;
         varying vec2 vTexCoord;
+        varying vec2 vSliceCoord;
         void main() {
             gl_Position = vec4(position, 0.0, 1.0);
             vTexCoord = texCoord;
+            vSliceCoord = sliceCoord;
         }
     )";
 
     juce::String fragmentShader = R"(
         uniform sampler2D tex;
         uniform float alpha;
+        uniform float blendLeft;
+        uniform float blendRight;
+        uniform float blendTop;
+        uniform float blendBottom;
+        uniform float blendGamma;
+        
+        uniform float fxVhs;
+        uniform float fxRgbShift;
+        uniform float fxScanlines;
+
         varying vec2 vTexCoord;
+        varying vec2 vSliceCoord;
+        
+        float applyEdgeBlend(float coord, float blendSize, float gamma) {
+            if (blendSize <= 0.0) return 1.0;
+            if (coord >= blendSize) return 1.0;
+            return pow(coord / blendSize, gamma);
+        }
+
         void main() {
-            vec4 col = texture2D(tex, vTexCoord);
-            gl_FragColor = col * alpha;
+            vec2 uv = vTexCoord;
+            
+            // VHS Tearing (horizontal shift based on Y and fxVhs)
+            if (fxVhs > 0.0) {
+                float tear = sin(uv.y * 50.0) * cos(uv.y * 13.0) * sin(uv.y * 123.0);
+                uv.x += tear * fxVhs * 0.05;
+            }
+            
+            // RGB Shift
+            vec4 col;
+            if (fxRgbShift > 0.0) {
+                float shift = fxRgbShift * 0.02;
+                col.r = texture2D(tex, uv + vec2(shift, 0.0)).r;
+                col.g = texture2D(tex, uv).g;
+                col.b = texture2D(tex, uv - vec2(shift, 0.0)).b;
+                col.a = texture2D(tex, uv).a;
+            } else {
+                col = texture2D(tex, uv);
+            }
+            
+            // Scanlines
+            if (fxScanlines > 0.0) {
+                float sl = sin(uv.y * 800.0) * 0.5 + 0.5; // 0 to 1
+                col.rgb *= mix(1.0, sl, fxScanlines * 0.5);
+            }
+
+            float blendX1 = applyEdgeBlend(vSliceCoord.x, blendLeft, blendGamma);
+            float blendX2 = applyEdgeBlend(1.0 - vSliceCoord.x, blendRight, blendGamma);
+            float blendY1 = applyEdgeBlend(vSliceCoord.y, blendTop, blendGamma);
+            float blendY2 = applyEdgeBlend(1.0 - vSliceCoord.y, blendBottom, blendGamma);
+            
+            float mask = blendX1 * blendX2 * blendY1 * blendY2;
+            gl_FragColor = col * alpha * mask;
         }
     )";
 
@@ -1569,6 +1691,9 @@ void OutputDeviceView::renderOpenGL()
                     v.texCoord[0] = srcX / compImage.getWidth();
                     v.texCoord[1] = srcY / compImage.getHeight();
                     
+                    v.sliceCoord[0] = tx;
+                    v.sliceCoord[1] = ty;
+                    
                     vertices.push_back(v);
                 }
             }
@@ -1598,6 +1723,7 @@ void OutputDeviceView::renderOpenGL()
             // Setup attributes and uniforms
             GLint posAttrib = glContext.extensions.glGetAttribLocation (shaderProgram->getProgramID(), "position");
             GLint texAttrib = glContext.extensions.glGetAttribLocation (shaderProgram->getProgramID(), "texCoord");
+            GLint sliceAttrib = glContext.extensions.glGetAttribLocation (shaderProgram->getProgramID(), "sliceCoord");
             
             if (posAttrib >= 0)
             {
@@ -1609,9 +1735,24 @@ void OutputDeviceView::renderOpenGL()
                 glContext.extensions.glVertexAttribPointer (texAttrib, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), &vertices[0].texCoord);
                 glContext.extensions.glEnableVertexAttribArray (texAttrib);
             }
+            if (sliceAttrib >= 0)
+            {
+                glContext.extensions.glVertexAttribPointer (sliceAttrib, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), &vertices[0].sliceCoord);
+                glContext.extensions.glEnableVertexAttribArray (sliceAttrib);
+            }
             
             shaderProgram->setUniform("tex", 0);
             shaderProgram->setUniform("alpha", slice.opacity * screen.opacity);
+            shaderProgram->setUniform("blendLeft", slice.blendLeft);
+            shaderProgram->setUniform("blendRight", slice.blendRight);
+            shaderProgram->setUniform("blendTop", slice.blendTop);
+            shaderProgram->setUniform("blendBottom", slice.blendBottom);
+            shaderProgram->setUniform("blendGamma", slice.blendGamma);
+
+            // Master FX Uniforms
+            shaderProgram->setUniform("fxVhs", mediaEngine.fxVhs.load());
+            shaderProgram->setUniform("fxRgbShift", mediaEngine.fxRgbShift.load());
+            shaderProgram->setUniform("fxScanlines", mediaEngine.fxScanlines.load());
             
             // Enable blending
             juce::gl::glEnable (GL_BLEND);
@@ -1621,6 +1762,7 @@ void OutputDeviceView::renderOpenGL()
             
             if (posAttrib >= 0) glContext.extensions.glDisableVertexAttribArray (posAttrib);
             if (texAttrib >= 0) glContext.extensions.glDisableVertexAttribArray (texAttrib);
+            if (sliceAttrib >= 0) glContext.extensions.glDisableVertexAttribArray (sliceAttrib);
         }
     }
     
